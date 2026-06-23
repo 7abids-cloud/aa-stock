@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="ms" class="h-full bg-slate-900">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AA STOCK ULTIMATE - Enterprise Inventory Node</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght=300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Library Barcode QR Scanner Ringan -->
+    <script src="https://unpkg.com/html5-qrcode"></script>
+    <style>
+        body { font-family: 'Plus Jakarta Sans', sans-serif; transition: all 0.3s ease; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        .glass-panel { background: rgba(255, 255, 255, 0.75); backdrop-filter: blur(12px); }
+        .animate-fade-in { animation: fadeIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+        @media print {
+            body { background: white !important; color: black !important; }
+            .no-print { display: none !important; }
+            .print-area { width: 100% !important; position: absolute; left: 0; top: 0; margin: 0; padding: 1cm !important; }
+        }
+    </style>
+</head>
+<body class="h-full text-slate-800 antialiased flex flex-col bg-slate-50">
+
+    <div id="toast-container" class="fixed top-5 right-5 z-50 flex flex-col gap-3 max-w-sm w-full pointer-events-none"></div>
+
+    <!-- Confirm Modal -->
+    <div id="confirm-modal" class="fixed inset-0 z-50 bg-slate-950/40 backdrop-blur-md hidden flex items-center justify-center p-4">
+        <div class="bg-white rounded-3xl max-w-md w-full shadow-2xl p-6">
+            <div class="w-12 h-12 rounded-2xl bg-amber-50 text-amber-500 flex items-center justify-center mb-4"><i data-lucide="alert-circle"></i></div>
+            <h3 id="confirm-title" class="text-lg font-bold text-slate-900">Pengesahan</h3>
+            <p id="confirm-desc" class="text-sm text-slate-500 mt-2"></p>
+            <div class="mt-6 flex justify-end gap-3">
+                <button id="confirm-btn-cancel" class="px-4 py-2.5 bg-slate-100 text-slate-700 rounded-xl font-semibold text-sm">Batal</button>
+                <button id="confirm-btn-confirm" class="px-5 py-2.5 bg-sky-600 text-white rounded-xl font-semibold text-sm shadow-lg shadow-sky-600/20">Teruskan</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scanner Modal -->
+    <div id="scanner-modal" class="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-md hidden flex items-center justify-center p-4">
+        <div class="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-sm font-bold text-slate-900 uppercase tracking-wide">Live Camera Barcode Scanner</h3>
+                <button onclick="stopScanner()" class="text-slate-400 hover:text-rose-500"><i data-lucide="x"></i></button>
+            </div>
+            <div id="interactive-reader" class="w-full overflow-hidden rounded-2xl bg-slate-100"></div>
+        </div>
+    </div>
+
+    <!-- Core Loader -->
+    <div id="app-root" class="flex flex-col md:flex-row h-full w-full overflow-hidden items-center justify-center bg-slate-950 text-white">
+        <div class="flex flex-col items-center gap-4">
+            <div class="w-12 h-12 rounded-2xl border-4 border-sky-500 border-t-transparent animate-spin"></div>
+            <p class="text-sm font-semibold tracking-wide text-slate-400">Deploying Ultimate Inventory Node Architecture...</p>
+        </div>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { getFirestore, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyDpQE3wu3v0EWyrcosBhZwR8rArNSNrikw",
+            authDomain: "aa-stock.firebaseapp.com",
+            projectId: "aa-stock",
+            storageBucket: "aa-stock.firebasestorage.app",
+            messagingSenderId: "143973644444",
+            appId: "1:143973644444:web:13fe67ef88896a1fd2d559",
+            measurementId: "G-K9KZRR8RNG"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const docRef = doc(db, "inventori", "data_pusat");
+
+        const langPack = {
+            ms: { dashboard: "Papan Pemuka", products: "Urus Produk", stockIn: "Stok Masuk", stockOut: "Stok Keluar", reports: "Laporan Baki", sku: "SKU", name: "Nama Produk", currentStock: "Baki Semasa", action: "Tindakan", save: "Simpan ke Cloud", search: "Cari...", status: "Status", safe: "Selamat", critical: "Kritikal", asset: "Nilai Aset", cost: "Kos Modal", price: "Harga Jual", creator: "Pengendali" },
+            id: { dashboard: "Dashboard", products: "Kelola Produk", stockIn: "Stok Masuk", stockOut: "Stok Keluar", reports: "Laporan Stok", sku: "SKU", name: "Nama Produk", currentStock: "Stok Sekarang", action: "Aksi", save: "Simpan ke Cloud", search: "Cari...", status: "Status", safe: "Aman", critical: "Kritis", asset: "Nilai Aset", cost: "Harga Modal", price: "Harga Jual", creator: "Oleh Akun" },
+            en: { dashboard: "Dashboard", products: "Manage Products", stockIn: "Stock In", stockOut: "Stock Out", reports: "Reports Ledger", sku: "SKU", name: "Product Name", currentStock: "Current Stock", action: "Action", save: "Save to Cloud", search: "Search...", status: "Status", safe: "Safe", critical: "Critical", asset: "Asset Value", cost: "Cost Price", price: "Retail Price", creator: "Operator" }
+        };
+
+        let state = { users: [], products: [], stockIn: [], stockOut: [], currentUser: null, activeView: 'dashboard', currentLang: 'id', searchQuery: '' };
+        let myChart = null;
+        let html5QrcodeScanner = null;
+
+        onSnapshot(docRef, (docSnap) => {
+            if (docSnap.exists()) {
+                const d = docSnap.data();
+                state.users = d.users || [];
+                state.products = d.products || [];
+                state.stockIn = d.stockIn || [];
+                state.stockOut = d.stockOut || [];
+            }
+            renderApp();
+        });
+
+        async function syncCloud() {
+            try { await setDoc(docRef, { users: state.users, products: state.products, stockIn: state.stockIn, stockOut: state.stockOut }, { merge: true }); } 
+            catch (e) { showToast('Sync Error', 'Gagal memproses data.', 'error'); }
+        }
+
+        window.changeLanguage = (lang) => { state.currentLang = lang; renderApp(); };
+        window.navigate = (view) => { state.activeView = view; state.searchQuery = ''; renderApp(); };
+        window.logout = () => { askConfirmation('Keluar?', 'Sesi anda akan dihentikan.', () => { state.currentUser = null; renderApp(); }); };
+        window.updateSearch = (val) => { state.searchQuery = val.toLowerCase(); filterProductTable(); };
+
+        window.showToast = function(title, message, type = 'success') {
+            const container = document.getElementById('toast-container');
+            if(!container) return;
+            const toast = document.createElement('div');
+            toast.className = `p-4 rounded-2xl shadow-xl border flex gap-3 bg-white/90 animate-fade-in border-slate-100`;
+            let icon = 'check-circle', color = 'text-sky-500';
+            if(type === 'error') { icon = 'x-circle'; color = 'text-rose-500'; }
+            toast.innerHTML = `<div class="${color}"><i data-lucide="${icon}"></i></div><div><h4 class="text-sm font-bold text-slate-900">${title}</h4><p class="text-xs text-slate-500 mt-0.5">${message}</p></div>`;
+            container.appendChild(toast); lucide.createIcons();
+            setTimeout(() => toast.remove(), 4000);
+        };
+
+        window.askConfirmation = function(title, description, onConfirm) {
+            const modal = document.getElementById('confirm-modal');
+            document.getElementById('confirm-title').textContent = title;
+            document.getElementById('confirm-desc').textContent = description;
+            modal.classList.remove('hidden');
+            document.getElementById('confirm-btn-cancel').onclick = () => modal.classList.add('hidden');
+            document.getElementById('confirm-btn-confirm').onclick = () => { modal.classList.add('hidden'); onConfirm(); };
+        };
+
+        // --- Kamera Scanner Engine ---
+        window.startScanner = (targetInputId) => {
+            document.getElementById('scanner-modal').classList.remove('hidden');
+            html5QrcodeScanner = new Html5Qrcode("interactive-reader");
+            html5QrcodeScanner.start(
+                { facingMode: "environment" },
+                { fps: 10, qrbox: { width: 250, height: 250 } },
+                (decodedText) => {
+                    document.getElementById(targetInputId).value = decodedText;
+                    stopScanner();
+                    showToast('Scan Success', `SKU Detected: ${decodedText}`);
+                },
+                () => {}
+            ).catch(() => showToast('Scanner Error', 'Gamera tidak dijumpai atau diblokir.', 'error'));
+        };
+
+        window.stopScanner = () => {
+            if(html5QrcodeScanner) {
+                html5QrcodeScanner.stop().then(() => {
+                    document.getElementById('scanner-modal').classList.add('hidden');
+                });
+            } else {
+                document.getElementById('scanner-modal').classList.add('hidden');
+            }
+        };
+
+        // --- Ekspor Data ke CSV (Excel Readable) ---
+        window.exportToCSV = () => {
+            let csvContent = "data:text/csv;charset=utf-8,SKU,Product Name,Category,Cost Price,Retail Price,Current Stock,Total Asset Value\n";
+            state.products.forEach(p => {
+                let row = `"${p.sku}","${p.name}","${p.category || '-'}","${p.cost || 0}","${p.price || 0}","${p.currentStock}","${(p.cost || 0) * p.currentStock}"`;
+                csvContent += row + "\n";
+            });
+            const encodedUri = encodeURI(csvContent);
+            const link = document.createElement("a");
+            link.setAttribute("href", encodedUri);
+            link.setAttribute("download", `AA_STOCK_LEDGER_${Date.now()}.csv`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            showToast('Export Complete', 'File CSV berhasil diunduh.');
+        };
+
+        window.handleLogin = (e) => {
+            e.preventDefault();
+            const match = state.users.find(u => u.username === document.getElementById('l-user').value && u.password === document.getElementById('l-pass').value);
+            if(match) { state.currentUser = match; navigate('dashboard'); } else { showToast('Ralat', 'Kredensial salah.', 'error'); }
+        };
+
+        window.handleWizard = async (e) => {
+            e.preventDefault();
+            state.users.push({ id: 'u_'+Date.now(), name: document.getElementById('w-name').value, username: document.getElementById('w-user').value, password: document.getElementById('w-pass').value, role: 'Admin' });
+            await syncCloud(); renderApp();
+        };
+
+        window.saveProduct = async (e) => {
+            e.preventDefault();
+            const id = document.getElementById('p-id').value || 'p_' + Date.now();
+            const productData = {
+                id, sku: document.getElementById('p-sku').value, name: document.getElementById('p-name').value,
+                category: document.getElementById('p-cat').value, minStock: Number(document.getElementById('p-min').value), 
+                unit: document.getElementById('p-unit').value, currentStock: Number(document.getElementById('p-curr').value),
+                cost: Number(document.getElementById('p-cost').value || 0), price: Number(document.getElementById('p-price').value || 0)
+            };
+            const idx = state.products.findIndex(p => p.id === id);
+            if(idx > -1) state.products[idx] = productData; else state.products.push(productData);
+            await syncCloud(); showToast('Selesai', 'Katalog data cloud dikemaskini.'); navigate('products');
+        };
+
+        window.handleStockIn = async (e) => {
+            e.preventDefault();
+            const p = state.products.find(prod => prod.id === document.getElementById('tx-p').value);
+            if(p) {
+                const qty = Number(document.getElementById('tx-q').value); p.currentStock += qty;
+                state.stockIn.push({ id: 'i_'+Date.now(), product: p.name, qty, date: new Date().toLocaleDateString(), operator: state.currentUser.name });
+                await syncCloud(); showToast('Success', 'Stok berhasil ditambahkan.'); navigate('dashboard');
+            }
+        };
+
+        window.handleStockOut = async (e) => {
+            e.preventDefault();
+            const p = state.products.find(prod => prod.id === document.getElementById('tx-p-o').value);
+            if(p) {
+                const qty = Number(document.getElementById('tx-q-o').value);
+                if(p.currentStock < qty) { showToast('Error', 'Stok tidak mencukupi!', 'error'); return; }
+                p.currentStock -= qty;
+                state.stockOut.push({ id: 'o_'+Date.now(), product: p.name, qty, date: new Date().toLocaleDateString(), operator: state.currentUser.name });
+                await syncCloud(); showToast('Success', 'Stok berhasil dikeluarkan.'); navigate('dashboard');
+            }
+        };
+
+        function getLangText(key) { return langPack[state.currentLang][key] || key; }
+
+        function filterProductTable() {
+            document.querySelectorAll('.product-row').forEach(row => {
+                row.style.display = row.getAttribute('data-search').includes(state.searchQuery) ? '' : 'none';
+            });
+        }
+
+        function renderApp() {
+            const root = document.getElementById('app-root');
+            if(!root) return;
+
+            if(state.users.length === 0) {
+                root.className = "flex h-full w-full items-center justify-center bg-slate-950 p-4 animate-fade-in";
+                root.innerHTML = `<div class="bg-slate-900 border border-slate-800 p-8 rounded-3xl shadow-2xl max-w-md w-full"><h2 class="text-xl font-bold text-white mb-1">Database Initializer</h2><form onsubmit="handleWizard(event)" class="space-y-4 mt-4"><div><label class="text-xs font-bold text-slate-400 block mb-1">Full Name</label><input type="text" id="w-name" required class="w-full bg-slate-950 border border-slate-800 p-3 rounded-xl text-sm text-white outline-none"></div><div><label class="text-xs font-bold text-slate-400 block mb-1">Username</label><input type="text" id="w-user" required class="w-full bg-slate-950 border border-slate-800 p-3 rounded-xl text-sm text-white outline-none"></div><div><label class="text-xs font-bold text-slate-400 block mb-1">Password</label><input type="password" id="w-pass" required class="w-full bg-slate-950 border border-slate-800 p-3 rounded-xl text-sm text-white outline-none"></div><button type="submit" class="w-full bg-sky-500 py-3 rounded-xl font-bold text-sm">Deploy Master Cloud Instance</button></form></div>`;
+                return;
+            }
+
+            if(!state.currentUser) {
+                root.className = "flex h-full w-full items-center justify-center bg-slate-950 p-4 animate-fade-in";
+                root.innerHTML = `<div class="bg-slate-900 border border-slate-800 p-8 rounded-3xl shadow-2xl max-w-sm w-full text-center"><h1 class="text-3xl font-black text-white">AA STOCK <span class="text-sky-500">ULTIMATE</span></h1><form onsubmit="handleLogin(event)" class="space-y-4 text-left mt-6"><div><label class="text-xs font-bold text-slate-400 block mb-1">Identity Node</label><input type="text" id="l-user" required class="w-full bg-slate-950 border border-slate-800 p-3 rounded-xl text-sm text-white outline-none"></div><div><label class="text-xs font-bold text-slate-400 block mb-1">Secure Passkey</label><input type="password" id="l-pass" required class="w-full bg-slate-950 border border-slate-800 p-3 rounded-xl text-sm text-white outline-none"></div><button type="submit" class="w-full bg-sky-500 py-3 rounded-xl font-bold text-sm">Authenticate Node</button></form></div>`;
+                return;
+            }
+
+            const totalAssets = state.products.reduce((acc, p) => acc + ((p.cost || 0) * p.currentStock), 0);
+
+            root.className = "flex flex-col md:flex-row h-full w-full overflow-hidden bg-slate-50";
+            root.innerHTML = `
+                <!-- Navigation Sidebar (Desktop) -->
+                <div class="hidden md:flex w-64 bg-slate-950 text-slate-100 flex-col shrink-0 no-print border-r border-slate-800">
+                    <div class="p-6 border-b border-slate-900 flex items-center gap-3">
+                        <div class="w-10 h-10 rounded-xl bg-sky-500 flex items-center justify-center font-bold text-white shadow-lg">AA</div>
+                        <div><h1 class="font-extrabold text-white text-sm">AA ULTIMATE</h1><p class="text-[9px] text-emerald-400 font-bold uppercase tracking-wider">Enterprise Mesh</p></div>
+                    </div>
+                    <div class="flex-1 overflow-y-auto px-4 py-4 space-y-1 no-scrollbar">
+                        <button onclick="navigate('dashboard')" class="w-full flex items-center gap-3 px-4 py-3 rounded-xl font-semibold text-xs text-left ${state.activeView === 'dashboard' ? 'bg-sky-500 text-white' : 'text-slate-400 hover:bg-slate-900'}"><i data-lucide="layout-grid" class="w-4 h-4"></i>${getLangText('dashboard')}</button>
+                        <button onclick="navigate('products')" class="w-full flex items-center gap-3 px-4 py-3 rounded-xl font-semibold text-xs text-left ${state.activeView === 'products' ? 'bg-sky-500 text-white' : 'text-slate-400 hover:bg-slate-900'}"><i data-lucide="layers" class="w-4 h-4"></i>${getLangText('products')}</button>
+                        <button onclick="navigate('stock-in')" class="w-full flex items-center gap-3 px-4 py-3 rounded-xl font-semibold text-xs text-left ${state.activeView === 'stock-in' ? 'bg-sky-500 text-white' : 'text-slate-400 hover:bg-slate-900'}"><i data-lucide="plus-circle" class="w-4 h-4 text-emerald-400"></i>${getLangText('stockIn')}</button>
+                        <button onclick="navigate('stock-out')" class="w-full flex items-center gap-3 px-4 py-3 rounded-xl font-semibold text-xs text-left ${state.activeView === 'stock-out' ? 'bg-sky-500 text-white' : 'text-slate-400 hover:bg-slate-900'}"><i data-lucide="minus-circle" class="w-4 h-4 text-rose-400"></i>${getLangText('stockOut')}</button>
+                        <button onclick="navigate('reports')" class="w-full flex items-center gap-3 px-4 py-3 rounded-xl font-semibold text-xs text-left ${state.activeView === 'reports' ? 'bg-sky-500 text-white' : 'text-slate-400 hover:bg-slate-900'}"><i data-lucide="printer" class="w-4 h-4"></i>${getLangText('reports')}</button>
+                    </div>
+                    <div class="p-4 border-t border-slate-900 flex items-center justify-between">
+                        <div><h4 class="text-xs font-bold text-white">${state.currentUser.name}</h4><span class="text-[9px] font-bold text-sky-400 uppercase">${state.currentUser.role}</span></div>
+                        <button onclick="logout()" class="p-2 text-slate-500 hover:text-rose-400 transition"><i data-lucide="power" class="w-4 h-4"></i></button>
+                    </div>
+                </div>
+
+                <!-- Main Workstation Viewport -->
+                <div class="flex-1 flex flex-col min-w-0 overflow-y-auto pb-20 md:pb-0">
+                    <header class="bg-white/80 backdrop-blur-md border-b border-slate-200/60 h-16 px-4 md:px-8 flex items-center justify-between no-print sticky top-0 z-30 shrink-0">
+                        <h2 class="font-extrabold text-slate-900 text-md uppercase tracking-tight">${getLangText(state.activeView)}</h2>
+                        <div class="flex items-center gap-3">
+                            <div class="flex bg-slate-100 p-1 rounded-xl gap-1 border border-slate-200/40 text-[10px] font-bold">
+                                <button onclick="changeLanguage('ms')" class="px-2 py-1 rounded-lg ${state.currentLang==='ms'?'bg-white text-sky-600 shadow-sm':'text-slate-500'}">MS</button>
+                                <button onclick="changeLanguage('id')" class="px-2 py-1 rounded-lg ${state.currentLang==='id'?'bg-white text-sky-600 shadow-sm':'text-slate-500'}">ID</button>
+                                <button onclick="changeLanguage('en')" class="px-2 py-1 rounded-lg ${state.currentLang==='en'?'bg-white text-sky-600 shadow-sm':'text-slate-500'}">EN</button>
+                            </div>
+                        </div>
+                    </header>
+                    <main class="flex-1 p-4 md:p-8 animate-fade-in">${renderActiveView(totalAssets)}</main>
+                </div>
+
+                <!-- Mobile Bottom Navigation (Adaptive) -->
+                <div class="md:hidden fixed bottom-0 left-0 right-0 h-16 bg-slate-950 border-t border-slate-800 flex items-center justify-around px-2 z-40 no-print">
+                    <button onclick="navigate('dashboard')" class="flex flex-col items-center justify-center text-center gap-1 ${state.activeView==='dashboard'?'text-sky-400':'text-slate-500'}"><i data-lucide="layout-grid" class="w-5 h-5"></i><span class="text-[9px] font-semibold">Dash</span></button>
+                    <button onclick="navigate('products')" class="flex flex-col items-center justify-center text-center gap-1 ${state.activeView==='products'?'text-sky-400':'text-slate-500'}"><i data-lucide="layers" class="w-5 h-5"></i><span class="text-[9px] font-semibold">Katalog</span></button>
+                    <button onclick="navigate('stock-in')" class="flex flex-col items-center justify-center text-center gap-1 ${state.activeView==='stock-in'?'text-sky-400':'text-slate-500'}"><i data-lucide="plus-circle" class="w-5 h-5"></i><span class="text-[9px] font-semibold">In</span></button>
+                    <button onclick="navigate('stock-out')" class="flex flex-col items-center justify-center text-center gap-1 ${state.activeView==='stock-out'?'text-sky-400':'text-slate-500'}"><i data-lucide="minus-circle" class="w-5 h-5"></i><span class="text-[9px] font-semibold">Out</span></button>
+                    <button onclick="navigate('reports')" class="flex flex-col items-center justify-center text-center gap-1 ${state.activeView==='reports'?'text-sky-400':'text-slate-500'}"><i data-lucide="printer" class="w-5 h-5"></i><span class="text-[9px] font-semibold">Ledger</span></button>
+                </div>
+            `;
+            lucide.createIcons();
+            initDashboardCharts();
+        }
+
+        function renderActiveView(totalAssets) {
+            if(state.activeView === 'dashboard') {
+                return `
+                    <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+                        <div class="bg-white p-5 border border-slate-200/60 rounded-2xl shadow-sm"><span class="text-[10px] text-slate-400 font-bold block uppercase tracking-wide">Unique SKU</span><span class="text-2xl font-black text-slate-900 mt-1 block">${state.products.length}</span></div>
+                        <div class="bg-white p-5 border border-slate-200/60 rounded-2xl shadow-sm"><span class="text-[10px] text-slate-400 font-bold block uppercase tracking-wide">Total Units</span><span class="text-2xl font-black text-sky-500 mt-1 block">${state.products.reduce((a,b)=>a+Number(b.currentStock),0)}</span></div>
+                        <div class="bg-white p-5 border border-slate-200/60 rounded-2xl shadow-sm col-span-2"><span class="text-[10px] text-emerald-500 font-bold block uppercase tracking-wide">${getLangText('asset')} (Valuation)</span><span class="text-2xl font-black text-emerald-600 mt-1 block">Rp ${totalAssets.toLocaleString('id-ID')}</span></div>
+                    </div>
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+                        <div class="bg-white p-4 md:p-6 border border-slate-200/60 rounded-3xl shadow-sm">
+                            <h3 class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">Stock Volume Balancing</h3>
+                            <div class="h-64"><canvas id="analyticsChart"></canvas></div>
+                        </div>
+                        <div class="bg-white p-4 md:p-6 border border-slate-200/60 rounded-3xl shadow-sm">
+                            <h3 class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">In / Out Transaction Flux Trend</h3>
+                            <div class="h-64"><canvas id="trendChart"></canvas></div>
+                        </div>
+                    </div>
+                `;
+            }
+            if(state.activeView === 'products') {
+                return `
+                    <div class="grid grid-cols-1 xl:grid-cols-3 gap-6">
+                        <div class="xl:col-span-2 bg-white border border-slate-200/60 rounded-3xl shadow-sm overflow-hidden flex flex-col">
+                            <div class="p-4 bg-slate-50/50 border-b border-slate-100 flex items-center justify-between gap-3">
+                                <div class="relative flex-1">
+                                    <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3 top-3"></i>
+                                    <input type="text" oninput="updateSearch(this.value)" placeholder="${getLangText('search')}" class="w-full pl-9 pr-4 py-2 border bg-white rounded-xl text-xs outline-none">
+                                </div>
+                            </div>
+                            <div class="overflow-x-auto"><table class="w-full text-left text-xs"><thead><tr class="bg-slate-50 text-slate-400 font-bold border-b border-slate-100 uppercase text-[10px] tracking-wider"><th class="p-4">${getLangText('sku')}</th><th class="p-4">${getLangText('name')}</th><th class="p-4">${getLangText('cost')}</th><th class="p-4">${getLangText('price')}</th><th class="p-4 text-right">${getLangText('currentStock')}</th></tr></thead><tbody class="divide-y divide-slate-100">
+                                ${state.products.length===0?'<tr><td colspan="5" class="p-8 text-center text-slate-400">Database node empty.</td></tr>':state.products.map(p=>`
+                                    <tr class="product-row hover:bg-slate-50/80 transition" data-search="${p.sku.toLowerCase()} ${p.name.toLowerCase()}">
+                                        <td class="p-4 font-mono font-bold text-slate-500">${p.sku}</td>
+                                        <td class="p-4 font-bold text-slate-900">${p.name}</td>
+                                        <td class="p-4 font-mono text-slate-600">Rp ${p.cost?.toLocaleString('id-ID')}</td>
+                                        <td class="p-4 font-mono text-sky-600 font-bold">Rp ${p.price?.toLocaleString('id-ID')}</td>
+                                        <td class="p-4 text-right font-black ${p.currentStock<=p.minStock?'text-rose-500':'text-slate-800'}">${p.currentStock} ${p.unit}</td>
+                                    </tr>`).join('')}
+                            </tbody></table></div>
+                        </div>
+                        <div class="bg-white p-6 border border-slate-200/60 rounded-3xl shadow-sm h-fit">
+                            <h3 class="font-extrabold text-slate-900 mb-4 text-sm tracking-tight">Katalog Config Form</h3>
+                            <form onsubmit="saveProduct(event)" class="space-y-3">
+                                <input type="hidden" id="p-id" value="">
+                                <div>
+                                    <label class="block text-[10px] font-bold text-slate-400 mb-1 uppercase">SKU Identifier *</label>
+                                    <div class="flex gap-2">
+                                        <input type="text" id="p-sku" required class="flex-1 border p-2.5 rounded-xl text-xs outline-none focus:border-sky-500">
+                                        <button type="button" onclick="startScanner('p-sku')" class="px-3 bg-slate-900 text-white rounded-xl hover:bg-slate-800 transition"><i data-lucide="scan-line" class="w-4 h-4"></i></button>
+                                    </div>
+                                </div>
+                                <div><label class="block text-[10px] font-bold text-slate-400 mb-1 uppercase">Product Designation *</label><input type="text" id="p-name" required class="w-full border p-2.5 rounded-xl text-xs outline-none"></div>
+                                <div class="grid grid-cols-2 gap-3">
+                                    <div><label class="block text-[10px] font-bold text-slate-400 mb-1 uppercase">Category</label><input type="text" id="p-cat" class="w-full border p-2.5 rounded-xl text-xs"></div>
+                                    <div><label class="block text-[10px] font-bold text-slate-400 mb-1 uppercase">Metric Unit</label><input type="text" id="p-unit" value="Pcs" required class="w-full border p-2.5 rounded-xl text-xs"></div>
+                                </div>
+                                <div class="grid grid-cols-2 gap-3">
+                                    <div><label class="block text-[10px] font-bold text-slate-400 mb-1 uppercase">Cost Price (Rp)</label><input type="number" id="p-cost" class="w-full border p-2.5 rounded-xl text-xs"></div>
+                                    <div><label class="block text-[10px] font-bold text-slate-400 mb-1 uppercase">Retail Price (Rp)</label><input type="number" id="p-price" class="w-full border p-2.5 rounded-xl text-xs"></div>
+                                </div>
+                                <div class="grid grid-cols-2 gap-3">
+                                    <div><label class="block text-[10px] font-bold text-slate-400 mb-1 uppercase">Initial Bal</label><input type="number" id="p-curr" value="0" class="w-full border p-2.5 rounded-xl text-xs"></div>
+                                    <div><label class="block text-[10px] font-bold text-slate-400 mb-1 uppercase">Min Alert</label><input type="number" id="p-min" value="5" class="w-full border p-2.5 rounded-xl text-xs"></div>
+                                </div>
+                                <button type="submit" class="w-full bg-sky-500 hover:bg-sky-600 text-white p-3 rounded-xl font-bold text-xs tracking-wide transition mt-2">${getLangText('save')}</button>
+                            </form>
+                        </div>
+                    </div>
+                `;
+            }
+            if(state.activeView === 'stock-in') {
+                return `
+                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                        <div class="bg-white p-6 border border-slate-200/60 rounded-3xl shadow-sm h-fit">
+                            <h3 class="font-bold text-emerald-600 mb-4 flex items-center gap-2 text-sm uppercase"><i data-lucide="plus-circle"></i>Inward Deployment</h3>
+                            <form onsubmit="handleStockIn(event)" class="space-y-4">
+                                <div><label class="text-xs font-bold text-slate-400 block mb-1">Target Node *</label><select id="tx-p" required class="w-full border p-2.5 bg-white rounded-xl text-xs">${state.products.map(p=>`<option value="${p.id}">${p.name} (${p.currentStock})</option>`).join('')}</select></div>
+                                <div><label class="text-xs font-bold text-slate-400 block mb-1">Inward Volume Qty *</label><input type="number" id="tx-q" min="1" required class="w-full border p-2.5 rounded-xl text-xs"></div>
+                                <button type="submit" class="w-full bg-emerald-600 text-white p-3 rounded-xl font-bold text-xs">Commit Inflow</button>
+                            </form>
+                        </div>
+                        <div class="lg:col-span-2 bg-white border border-slate-200/60 rounded-3xl shadow-sm overflow-hidden">
+                            <div class="p-4 border-b bg-slate-50/50"><h3 class="font-bold text-xs text-slate-400 uppercase">Live Audit Stream (In)</h3></div>
+                            <div class="max-h-96 overflow-y-auto"><table class="w-full text-left text-xs"><thead><tr class="bg-slate-50 text-slate-400 border-b text-[10px] uppercase"><th class="p-3">Date</th><th class="p-3">Item</th><th class="p-3">${getLangText('creator')}</th><th class="p-3 text-right">Volume</th></tr></thead><tbody class="divide-y divide-slate-100">${state.stockIn.slice().reverse().map(l=>`<tr><td class="p-3 text-slate-400 font-mono">${l.date}</td><td class="p-3 font-bold">${l.product}</td><td class="p-3 text-slate-500">${l.operator || 'System'}</td><td class="p-3 text-right font-black text-emerald-600">+ ${l.qty}</td></tr>`).join('')}</tbody></table></div>
+                        </div>
+                    </div>
+                `;
+            }
+            if(state.activeView === 'stock-out') {
+                return `
+                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                        <div class="bg-white p-6 border border-slate-200/60 rounded-3xl shadow-sm h-fit">
+                            <h3 class="font-bold text-rose-600 mb-4 flex items-center gap-2 text-sm uppercase"><i data-lucide="minus-circle"></i>Outward Release</h3>
+                            <form onsubmit="handleStockOut(event)" class="space-y-4">
+                                <div><label class="text-xs font-bold text-slate-400 block mb-1">Target Node *</label><select id="tx-p-o" required class="w-full border p-2.5 bg-white rounded-xl text-xs">${state.products.map(p=>`<option value="${p.id}">${p.name} (${p.currentStock})</option>`).join('')}</select></div>
+                                <div><label class="text-xs font-bold text-slate-400 block mb-1">Release Volume Qty *</label><input type="number" id="tx-q-o" min="1" required class="w-full border p-2.5 rounded-xl text-xs"></div>
+                                <button type="submit" class="w-full bg-rose-600 text-white p-3 rounded-xl font-bold text-xs">Commit Outflow</button>
+                            </form>
+                        </div>
+                        <div class="lg:col-span-2 bg-white border border-slate-200/60 rounded-3xl shadow-sm overflow-hidden">
+                            <div class="p-4 border-b bg-slate-50/50"><h3 class="font-bold text-xs text-slate-400 uppercase">Live Audit Stream (Out)</h3></div>
+                            <div class="max-h-96 overflow-y-auto"><table class="w-full text-left text-xs"><thead><tr class="bg-slate-50 text-slate-400 border-b text-[10px] uppercase"><th class="p-3">Date</th><th class="p-3">Item</th><th class="p-3">${getLangText('creator')}</th><th class="p-3 text-right">Volume</th></tr></thead><tbody class="divide-y divide-slate-100">${state.stockOut.slice().reverse().map(l=>`<tr><td class="p-3 text-slate-400 font-mono">${l.date}</td><td class="p-3 font-bold">${l.product}</td><td class="p-3 text-slate-500">${l.operator || 'System'}</td><td class="p-3 text-right font-black text-rose-600">- ${l.qty}</td></tr>`).join('')}</tbody></table></div>
+                        </div>
+                    </div>
+                `;
+            }
+            if(state.activeView === 'reports') {
+                return `
+                    <div class="bg-white p-6 md:p-8 border border-slate-200 rounded-3xl shadow-md print-area">
+                        <div class="flex justify-between items-start border-b pb-6 mb-6">
+                            <div>
+                                <h2 class="text-2xl font-black text-slate-900 tracking-tight">AA STOCK ENTERPRISE NODE</h2>
+                                <p class="text-xs text-slate-400 font-semibold uppercase mt-0.5">Master Node Structural Ledger Balance</p>
+                            </div>
+                            <div class="flex gap-2 no-print">
+                                <button onclick="exportToCSV()" class="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 rounded-xl font-bold text-xs flex items-center gap-2 shadow-md transition"><i data-lucide="file-spreadsheet"></i> Export Excel (CSV)</button>
+                                <button onclick="window.print()" class="bg-slate-900 hover:bg-slate-800 text-white px-4 py-2.5 rounded-xl font-bold text-xs flex items-center gap-2 shadow-md transition"><i data-lucide="printer"></i> Print Ledger</button>
+                            </div>
+                        </div>
+                        <table class="w-full text-left text-xs border-collapse">
+                            <thead><tr class="bg-slate-50 border-b font-bold text-slate-500 uppercase"><th class="p-3">SKU</th><th class="p-3">Designation</th><th class="p-3">Asset Valuation</th><th class="p-3 text-right">Physical Balance</th></tr></thead>
+                            <tbody class="divide-y divide-slate-200">${state.products.map(p=>`<tr><td class="p-3 font-mono text-slate-500">${p.sku}</td><td class="p-3 font-bold text-slate-900">${p.name}</td><td class="p-3 text-emerald-600 font-semibold">Rp ${((p.cost||0)*p.currentStock).toLocaleString('id-ID')}</td><td class="p-3 text-right font-black text-sky-600">${p.currentStock} ${p.unit}</td></tr>`).join('')}</tbody>
+                        </table>
+                    </div>
+                `;
+            }
+        }
+
+        function initDashboardCharts() {
+            const ctx1 = document.getElementById('analyticsChart');
+            if(ctx1) {
+                if(myChart) myChart.destroy();
+                myChart = new Chart(ctx1.getContext('2d'), {
+                    type: 'bar',
+                    data: {
+                        labels: state.products.map(p => p.name),
+                        datasets: [{ label: 'Stock Vol', data: state.products.map(p => p.currentStock), backgroundColor: 'rgba(14, 165, 233, 0.6)', borderRadius: 6 }]
+                    },
+                    options: { responsive: true, maintainAspectRatio: false }
+                });
+            }
+
+            const ctx2 = document.getElementById('trendChart');
+            if(ctx2) {
+                new Chart(ctx2.getContext('2d'), {
+                    type: 'line',
+                    data: {
+                        labels: ['Flux-4', 'Flux-3', 'Flux-2', 'Current Node'],
+                        datasets: [
+                            { label: 'Inward Volume', data: [state.stockIn.length * 2, state.stockIn.length * 4, state.stockIn.length * 3, state.stockIn.length], borderColor: '#10b981', tension: 0.3, fill: false },
+                            { label: 'Outward Volume', data: [state.stockOut.length * 1, state.stockOut.length * 3, state.stockOut.length * 5, state.stockOut.length], borderColor: '#f43f5e', tension: 0.3, fill: false }
+                        ]
+                    },
+                    options: { responsive: true, maintainAspectRatio: false }
+                });
+            }
+        }
+    </script>
+</body>
+</html>
